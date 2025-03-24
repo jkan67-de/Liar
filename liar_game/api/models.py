@@ -35,13 +35,14 @@ class Room(models.Model):
 class Player(models.Model):
     room = models.ForeignKey(Room, on_delete=models.CASCADE)
     name = models.CharField(max_length=50)
-    session_key = models.CharField(max_length=100)
+    session_key = models.CharField(max_length=50)
     is_host = models.BooleanField(default=False)
     is_liar = models.BooleanField(default=False)
     has_answered = models.BooleanField(default=False)
     has_voted = models.BooleanField(default=False)
     answer = models.TextField(null=True, blank=True)
-    voted_for = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True)
+    voted_for = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL)
+    points = models.IntegerField(default=0)
 
 
 class QuestionPair(models.Model):

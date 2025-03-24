@@ -31,7 +31,8 @@ class Room extends Component {
             hasAnswered: false,
             hasVoted: false,
             current_player: null,
-            answer: ''
+            answer: '',
+            votedFor: null
         };
         this.roomCode = this.props.params.roomCode;
         this.leaveButtonPressed = this.leaveButtonPressed.bind(this);
@@ -62,7 +63,7 @@ class Room extends Component {
     }
 
     getRoomDetails() {
-        fetch("/api/get-room?code=" + this.roomCode, {
+        fetch(`/api/room?code=${this.roomCode}`, {
             method: "GET",
             headers: { 
                 "Content-Type": "application/json",
@@ -70,44 +71,79 @@ class Room extends Component {
             },
             credentials: "include"
         })
-            .then((response) => response.json())
-            .then((data) => {
-                if (data) {
-                    // Check if current player still exists in the room
-                    if (!data.current_player) {
-                        // Player was kicked or doesn't exist in the room
-                        this.props.leaveRoomCallback();
-                        this.props.navigate("/");
-                        return;
-                    }
-
-                    const currentRoundChanged = data.current_round !== this.state.currentRound;
-                    this.setState({
-                        isHost: data.is_host,
-                        gameStarted: data.game_started,
-                        currentRound: data.current_round,
-                        roundComplete: data.round_complete,
-                        votingPhase: data.voting_phase,
-                        players: data.players || [],
-                        currentQuestion: data.current_game_round?.question_pair || null,
-                        current_player: data.current_player,
-                        hasAnswered: currentRoundChanged ? false : this.state.hasAnswered,
-                        hasVoted: currentRoundChanged ? false : this.state.hasVoted,
-                        answer: currentRoundChanged ? '' : this.state.answer
-                    });
+            .then((response) => {
+                if (response.status === 403 || response.status === 404) {
+                    // Room no longer exists or player no longer has access
+                    sessionStorage.removeItem('room_code');
+                    this.props.navigate('/');
+                    return Promise.reject('Room no longer exists');
                 }
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then((data) => {
+                // Use the current_player data directly from the backend
+                const currentPlayer = data.current_player;
+                
+                // Set isHost based on the current player's host status
+                const isHost = currentPlayer?.is_host === true;
+                
+                this.setState({
+                    players: data.players,
+                    isHost: isHost,
+                    gameStarted: data.game_started,
+                    currentRound: data.current_round,
+                    roundComplete: data.round_complete,
+                    votingPhase: data.voting_phase,
+                    currentQuestion: data.current_game_round?.question_pair,
+                    current_player: currentPlayer,
+                    hasAnswered: currentPlayer?.has_answered || false,
+                    hasVoted: currentPlayer?.has_voted || false,
+                    answer: currentPlayer?.answer || '',
+                    votedFor: currentPlayer?.voted_for || null
+                });
+
+                // If round is complete, refresh room details again after a short delay to get updated points
+                if (data.round_complete) {
+                    setTimeout(() => {
+                        this.getRoomDetails();
+                    }, 1000);
+                }
+            })
+            .catch((error) => {
+                if (error === 'Room no longer exists') {
+                    // Don't show error message for room closure, just redirect
+                    return;
+                }
+                alert(error.message);
             });
     }
 
     leaveButtonPressed() {
         const requestOptions = {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+                "Content-Type": "application/json",
+                "X-CSRFToken": document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
+            },
+            credentials: "include"
         };
-        fetch("/api/leave-room", requestOptions).then((_response) => {
-            this.props.leaveRoomCallback();
-            this.props.navigate("/");  // Changed from history.push
-        });
+        
+        fetch("/api/leave-room", requestOptions)
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('Failed to leave room');
+                }
+                // Clear any room code from session storage
+                sessionStorage.removeItem('room_code');
+                // Navigate to home page
+                this.props.navigate("/");
+            })
+            .catch((error) => {
+                alert(error.message);
+            });
     }
 
   updateShowSettings(value) {
@@ -197,24 +233,55 @@ class Room extends Component {
   submitVote(playerId) {
     const requestOptions = {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "X-CSRFToken": document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
+      },
+      credentials: "include",
       body: JSON.stringify({
         room_code: this.roomCode,
         voted_for: playerId
       })
     };
+    
     fetch("/api/submit-vote", requestOptions)
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok) {
+          return response.text().then(text => {
+            try {
+              const data = JSON.parse(text);
+              throw new Error(data.error || 'Failed to submit vote');
+            } catch (e) {
+              throw new Error('Failed to submit vote: ' + text);
+            }
+          });
+        }
+        return response.text().then(text => {
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            throw new Error('Invalid response from server');
+          }
+        });
+      })
       .then((data) => {
         this.setState({ hasVoted: true });
+        // Always refresh room details after voting to get updated points
         this.getRoomDetails();
+      })
+      .catch((error) => {
+        alert(error.message);
       });
   }
 
   nextRound() {
     const requestOptions = {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "X-CSRFToken": document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
+      },
+      credentials: "include",
       body: JSON.stringify({
         room_code: this.roomCode
       })
@@ -225,47 +292,59 @@ class Room extends Component {
         this.setState({
           hasAnswered: false,
           hasVoted: false,
-          answer: ''
+          answer: '',
+          votedFor: null
         });
-        this.getRoomDetails();
-      });
-  }
-
-  kickPlayer(playerId) {
-    const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
-
-    const requestOptions = {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "X-CSRFToken": csrfToken || ''
-      },
-      credentials: "include",
-      body: JSON.stringify({
-        player_id: playerId
-      })
-    };
-
-    fetch("/api/kick-player", requestOptions)
-      .then((response) => {
-        if (!response.ok) {
-          return response.json().then(data => {
-            throw new Error(data.error || 'Failed to kick player');
-          });
-        }
-        return response.json();
-      })
-      .then((data) => {
-        if (data.error) {
-          throw new Error(data.error);
-        }
         this.getRoomDetails();
       })
       .catch((error) => {
-        console.error('Error kicking player:', error.message);
-        // You might want to show this error to the user in the UI
+        console.error('Error starting next round:', error);
       });
   }
+
+  kickPlayer = async (playerId) => {
+    try {
+      console.log('Attempting to kick player:', playerId);
+      console.log('Current player:', this.state.current_player);
+      
+      const response = await fetch('/api/kick-player', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          "X-CSRFToken": document.cookie.match(/csrftoken=([^;]+)/)?.[1] || ''
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          room_code: this.roomCode,
+          player_id: playerId
+        })
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to kick player');
+      }
+
+      // Check if the kicked player is the current player
+      const data = await response.json();
+      console.log('Kick response:', data);
+      console.log('Current player ID:', this.state.current_player?.id);
+      console.log('Kicked player ID:', data.kicked_player_id);
+      
+      if (data.kicked_player_id === this.state.current_player?.id) {
+        console.log('Current player was kicked, redirecting to home...');
+        // If the current player was kicked, redirect to home
+        this.props.navigate('/');
+        return;
+      }
+
+      // Update room details
+      this.getRoomDetails();
+    } catch (error) {
+      console.error('Error kicking player:', error);
+      alert(error.message);
+    }
+  };
 
   render() {
     if (this.state.showSettings) {
@@ -280,8 +359,8 @@ class Room extends Component {
         </Grid>
         
         <Grid item xs={12} align="center">
-          <PlayerList 
-            players={this.state.players} 
+          <PlayerList
+            players={this.state.players}
             isHost={this.state.isHost}
             onKickPlayer={this.kickPlayer}
           />
@@ -289,30 +368,26 @@ class Room extends Component {
 
         {!this.state.gameStarted && (
           <Grid item xs={12} align="center">
-            {this.state.isHost ? (
+            {this.state.isHost && (
               <>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={this.startGame}
-                  disabled={this.state.players.length < 2}
-                >
-                  Start Game
-                </Button>
-                {this.state.players.length < 2 && (
-                  <Typography variant="body2" color="error" style={{ marginTop: "0.5rem" }}>
-                    Need at least 2 players to start
+                {this.state.players.length < 2 ? (
+                  <Typography variant="body1" color="textSecondary" style={{ marginTop: "1rem" }}>
+                    Waiting for at least 2 players to start the game...
                   </Typography>
+                ) : (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={this.startGame}
+                    style={{ marginTop: "1rem" }}
+                  >
+                    Start Game
+                  </Button>
                 )}
               </>
-            ) : (
-              <Typography variant="body1">
-                Waiting for host to start the game...
-              </Typography>
             )}
           </Grid>
         )}
-
 
         {this.state.gameStarted && (
           <Grid item xs={12} align="center">
@@ -358,6 +433,14 @@ class Room extends Component {
             </Typography>
             <Typography variant="body1" color="textSecondary" gutterBottom>
               Their question was: {this.state.currentQuestion?.liar_question}
+            </Typography>
+            <Typography variant="body1" color="primary" gutterBottom>
+              {this.state.current_player?.is_liar ? 
+                "You earned 2 points for fooling everyone!" :
+                this.state.current_player?.voted_for === this.state.players.find(p => p.is_liar)?.id ?
+                  "You earned 1 point for correctly identifying the liar!" :
+                  "You didn't earn any points this round."
+              }
             </Typography>
             {this.state.isHost && (
               <Button

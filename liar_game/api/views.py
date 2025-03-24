@@ -9,39 +9,37 @@ from django.http import JsonResponse
 import random
 from django.urls import path
 
-class RoomView(generics.ListAPIView):  # Changed from ListAPIView to ListCreateAPIView
-    queryset = Room.objects.all()
-    serializer_class = RoomSerializer
-
-class GetRoom(APIView):
-    serializer_class = RoomSerializer
-    lookup_url_kwarg = 'code'
-
+class RoomView(APIView):
     def get(self, request, format=None):
-        code = request.GET.get(self.lookup_url_kwarg)
-        if code != None:
-            room = Room.objects.filter(code=code).first()
-            if room:
-                # Get all players in the room
-                players = Player.objects.filter(room=room)
-                print(f"GetRoom: Found {players.count()} players in room {room.code}")
-                print(f"GetRoom: Room has current_game_round {room.current_game_round.id if room.current_game_round else None}")
-                
-                data = RoomSerializer(room).data
-                current_player = Player.objects.filter(
-                    session_key=self.request.session.session_key,
-                    room=room
-                ).first()
-                if current_player:
-                    data['current_player'] = PlayerSerializer(current_player).data
-                    # Add is_host information
-                    data['is_host'] = current_player.is_host
-                    print(f"GetRoom: Current player {current_player.name} is_liar={current_player.is_liar}")
-                
-                print(f"GetRoom: Sending data with current_game_round {data.get('current_game_round', {}).get('id') if data.get('current_game_round') else None}")
-                return Response(data, status=status.HTTP_200_OK)
-            return Response({'Room Not Found': 'Invalid Room Code.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response({'Bad Request': 'Code parameter not found in request'}, status=status.HTTP_400_BAD_REQUEST)
+        room_code = request.GET.get('code')
+        if not room_code:
+            return Response({'error': 'Room code is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        room = Room.objects.filter(code=room_code).first()
+        if not room:
+            return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get current player
+        current_player = Player.objects.filter(
+            session_key=request.session.session_key,
+            room=room
+        ).first()
+
+        if not current_player:
+            # Player is not in the room, return 403 Forbidden
+            return Response({'error': 'You no longer have access to this room'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get all players in the room
+        players = Player.objects.filter(room=room)
+
+        # Get room data with current player information
+        room_data = RoomSerializer(room).data
+        # Ensure current player data has correct host status
+        current_player_data = PlayerSerializer(current_player).data
+        current_player_data['is_host'] = current_player.is_host  # Explicitly set is_host
+        room_data['current_player'] = current_player_data
+
+        return Response(room_data)
 
 class JoinRoom(APIView):
     lookup_url_kwarg = 'code'
@@ -73,7 +71,8 @@ class JoinRoom(APIView):
                     player = Player(
                         room=room,
                         name=player_name,
-                        session_key=self.request.session.session_key
+                        session_key=self.request.session.session_key,
+                        is_host=False  # Explicitly set is_host to False for joining players
                     )
                     player.save()
                 self.request.session['room_code'] = code
@@ -115,7 +114,7 @@ class CreateRoomView(APIView):
                 room=room,
                 name=host_name,
                 session_key=host,
-                is_host=True
+                is_host=True  # Only set is_host=True for the first player
             )
 
             self.request.session['room_code'] = room.code
@@ -143,16 +142,35 @@ class UserInRoom(APIView):
         }
         return JsonResponse(data, status=status.HTTP_200_OK)
 
-class LeaveRoom(APIView):
+class LeaveRoomView(APIView):
     def post(self, request, format=None):
         if 'room_code' in self.request.session:
             code = self.request.session.pop('room_code')
-            host_id = self.request.session.session_key
-            room_results = Room.objects.filter(host=host_id)
-            if len(room_results) > 0:
-                room = room_results[0]
+            session_key = self.request.session.session_key
+            
+            # Find the room
+            room = Room.objects.filter(code=code).first()
+            if not room:
+                return Response({'Message': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            # Find the player
+            player = Player.objects.filter(
+                session_key=session_key,
+                room=room
+            ).first()
+
+            if not player:
+                return Response({'Message': 'Player not found in room'}, status=status.HTTP_404_NOT_FOUND)
+
+            # If player is host, delete the room and all players
+            if player.is_host:
+                Player.objects.filter(room=room).delete()
                 room.delete()
-            return Response({'Message': 'Success'}, status=status.HTTP_200_OK)
+                return Response({'Message': 'Room deleted'}, status=status.HTTP_200_OK)
+            
+            # If player is not host, just remove them
+            player.delete()
+            return Response({'Message': 'Player left room'}, status=status.HTTP_200_OK)
 
         return Response({'Message': 'Not in a room'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -196,9 +214,6 @@ class StartGame(APIView):
         room.current_game_round = game_round
         room.save()
 
-        print(f"StartGame: Created game round {game_round.id} with question pair {question_pair.id}")
-        print(f"StartGame: Room {room.code} now has current_game_round {room.current_game_round.id}")
-
         return Response(RoomSerializer(room).data)
 
 class SubmitAnswer(APIView):
@@ -235,36 +250,92 @@ class SubmitAnswer(APIView):
 
 class SubmitVote(APIView):
     def post(self, request, format=None):
-        room_code = request.data.get('room_code')
-        voted_for_id = request.data.get('voted_for')
+        try:
+            room_code = request.data.get('room_code')
+            voted_for_id = request.data.get('voted_for')
+            
+            if not room_code or voted_for_id is None:
+                return Response({'error': 'Room code and voted_for are required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not room_code or not voted_for_id:
-            return Response({'error': 'Missing data'}, status=status.HTTP_400_BAD_REQUEST)
+            room = Room.objects.filter(code=room_code).first()
+            if not room:
+                return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        room = Room.objects.filter(code=room_code).first()
-        if not room:
-            return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
+            # Get current player
+            current_player = Player.objects.filter(
+                session_key=request.session.session_key,
+                room=room
+            ).first()
+            
+            if not current_player:
+                return Response({'error': 'Player not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        player = Player.objects.filter(
-            session_key=self.request.session.session_key,
-            room=room
-        ).first()
+            # Get the player being voted for
+            voted_for_player = Player.objects.filter(id=voted_for_id, room=room).first()
+            if not voted_for_player:
+                return Response({'error': 'Player voted for not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        voted_for = Player.objects.filter(id=voted_for_id, room=room).first()
-        if not player or not voted_for:
-            return Response({'error': 'Player not found'}, status=status.HTTP_404_NOT_FOUND)
+            # Check if player has already voted
+            if current_player.has_voted:
+                return Response({'error': 'You have already voted'}, status=status.HTTP_400_BAD_REQUEST)
 
-        player.voted_for = voted_for
-        player.has_voted = True
-        player.save()
+            # Get current game round
+            current_round = GameRound.objects.filter(room=room).order_by('-created_at').first()
+            if not current_round:
+                return Response({'error': 'No active game round'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if all players have voted
-        all_voted = all(p.has_voted for p in room.player_set.all())
-        if all_voted:
-            room.round_complete = True
-            room.save()
+            # Update player's vote
+            current_player.voted_for = voted_for_player
+            current_player.has_voted = True
+            current_player.save()
 
-        return Response(RoomSerializer(room).data)
+            # Check if all players have voted
+            all_players = Player.objects.filter(room=room)
+            all_voted = all(all_players.values_list('has_voted', flat=True))
+
+            if all_voted:
+                # Count votes for each player
+                vote_counts = {}
+                for player in all_players:
+                    if player.voted_for:
+                        vote_counts[player.voted_for.id] = vote_counts.get(player.voted_for.id, 0) + 1
+
+                # Find the player with the most votes
+                most_voted_id = max(vote_counts.items(), key=lambda x: x[1])[0] if vote_counts else None
+
+                # Get the actual liar
+                liar = current_round.liar
+
+                # Update points based on voting results
+                if most_voted_id == liar.id:
+                    # Majority correctly identified the liar
+                    for player in all_players:
+                        if player.voted_for and player.voted_for.id == liar.id:
+                            player.points += 1
+                            player.save()
+                else:
+                    # Majority failed to identify the liar
+                    liar.points += 2
+                    liar.save()
+
+                # Mark round as complete
+                room.round_complete = True
+                room.save()
+
+                return Response({
+                    'message': 'Round complete',
+                    'round_complete': True,
+                    'liar_id': liar.id,
+                    'liar_name': liar.name
+                })
+
+            return Response({
+                'message': 'Vote recorded',
+                'round_complete': False
+            })
+        except Exception as e:
+            print(f"Error in SubmitVote: {str(e)}")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class NextRound(APIView):
     def post(self, request, format=None):
@@ -311,9 +382,6 @@ class NextRound(APIView):
         room.current_game_round = game_round
         room.save()
 
-        print(f"NextRound: Created game round {game_round.id} with question pair {question_pair.id}")
-        print(f"NextRound: Room {room.code} now has current_game_round {room.current_game_round.id}")
-
         return Response(RoomSerializer(room).data)
 
 class UpdateRoom(APIView):
@@ -356,24 +424,44 @@ class UpdateRoom(APIView):
 
 class KickPlayer(APIView):
     def post(self, request, format=None):
-        try:
-            room = Room.objects.filter(host=self.request.session.session_key).first()
-            if not room:
-                return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
+        room_code = request.data.get('room_code')
+        player_id = request.data.get('player_id')
+        
+        if not room_code or not player_id:
+            return Response({'error': 'Room code and player ID are required'}, status=status.HTTP_400_BAD_REQUEST)
 
-            player_id = request.data.get('player_id')
-            if not player_id:
-                return Response({'error': 'Player ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+        room = Room.objects.filter(code=room_code).first()
+        if not room:
+            return Response({'error': 'Room not found'}, status=status.HTTP_404_NOT_FOUND)
 
-            player = Player.objects.get(id=player_id, room=room)
-            if player.is_host:
-                return Response({'error': 'Cannot kick the host'}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Delete the player
-            player.delete()
-            return Response({'message': 'Player kicked successfully'}, status=status.HTTP_200_OK)
-        except Player.DoesNotExist:
+        # Verify the requesting player is the host
+        host = Player.objects.filter(
+            room=room,
+            session_key=request.session.session_key,
+            is_host=True
+        ).first()
+        
+        if not host:
+            return Response({'error': 'Only the host can kick players'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get the player to kick
+        player_to_kick = Player.objects.filter(id=player_id, room=room).first()
+        if not player_to_kick:
             return Response({'error': 'Player not found'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            print(f"Error in KickPlayer: {str(e)}")  # Add logging
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Don't allow kicking the host
+        if player_to_kick.is_host:
+            return Response({'error': 'Cannot kick the host'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Store the kicked player's ID before deletion
+        kicked_player_id = player_to_kick.id
+        kicked_player_session = player_to_kick.session_key
+
+        # Delete the player
+        player_to_kick.delete()
+
+        return Response({
+            'message': 'Player kicked successfully',
+            'kicked_player_id': kicked_player_id,
+            'kicked_player_session': kicked_player_session
+        })
