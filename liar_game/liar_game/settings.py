@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-4k5j6k7l8m9n0p1q2r3s4t5u6v7w8x9y0z'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-4k5j6k7l8m9n0p1q2r3s4t5u6v7w8x9y0z')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'
@@ -32,23 +32,21 @@ ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',')
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,https://your-vercel-domain.vercel.app').split(',')
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,https://liar-game.vercel.app').split(',')
 
 # Cookie settings
-SESSION_COOKIE_SAMESITE = 'Lax'  # Changed from 'None' to 'Lax' for development
+SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_NAME = 'sessionid'
-SESSION_COOKIE_DOMAIN = None
+SESSION_COOKIE_DOMAIN = os.getenv('SESSION_COOKIE_DOMAIN', None)
 SESSION_COOKIE_PATH = '/'
 SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False') == 'True'
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # CSRF settings
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-CSRF_COOKIE_SAMESITE = 'Lax'  # Changed from 'None' to 'Lax' for development
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000,https://liar-game.vercel.app').split(',')
+CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False') == 'True'
+CSRF_COOKIE_DOMAIN = os.getenv('CSRF_COOKIE_DOMAIN', None)
 CSRF_COOKIE_HTTPONLY = True
 CSRF_USE_SESSIONS = True
 

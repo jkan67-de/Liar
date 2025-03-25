@@ -26,8 +26,12 @@
     "env": {
         "DJANGO_DEBUG": "False",
         "DJANGO_ALLOWED_HOSTS": ".vercel.app",
-        "CORS_ALLOWED_ORIGINS": "https://your-vercel-domain.vercel.app",
+        "CORS_ALLOWED_ORIGINS": "https://liar-game.vercel.app",
         "SESSION_COOKIE_SECURE": "True",
-        "CSRF_COOKIE_SECURE": "True"
+        "CSRF_COOKIE_SECURE": "True",
+        "CSRF_TRUSTED_ORIGINS": "https://liar-game.vercel.app",
+        "DJANGO_SECRET_KEY": "your-secret-key-here",
+        "SESSION_COOKIE_DOMAIN": ".vercel.app",
+        "CSRF_COOKIE_DOMAIN": ".vercel.app"
     }
 } 
