@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,28 +21,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-23=zltjt&zp#vr+$t4g)b7p34t^0q1tm!ry$o#j8xtl!y3(or!'
+SECRET_KEY = 'django-insecure-4k5j6k7l8m9n0p1q2r3s4t5u6v7w8x9y0z'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React development server
-    "http://127.0.0.1:3000",
-]
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,https://your-vercel-domain.vercel.app').split(',')
 
 # Cookie settings
 SESSION_COOKIE_SAMESITE = 'Lax'  # Changed from 'None' to 'Lax' for development
 SESSION_COOKIE_NAME = 'sessionid'
 SESSION_COOKIE_DOMAIN = None
 SESSION_COOKIE_PATH = '/'
-SESSION_COOKIE_SECURE = False  # Set to False for development without HTTPS
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False') == 'True'
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # CSRF settings
@@ -50,7 +48,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 CSRF_COOKIE_SAMESITE = 'Lax'  # Changed from 'None' to 'Lax' for development
-CSRF_COOKIE_SECURE = False  # Set to False for development without HTTPS
+CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False') == 'True'
 CSRF_COOKIE_HTTPONLY = True
 CSRF_USE_SESSIONS = True
 
@@ -64,10 +62,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'api.apps.ApiConfig',
     'rest_framework',
-    'frontend.apps.FrontendConfig',
-    'corsheaders'
+    'corsheaders',
+    'api',
 ]
 
 MIDDLEWARE = [
@@ -148,10 +145,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [
-    BASE_DIR / 'frontend/static'
+    os.path.join(BASE_DIR, 'frontend/static')
 ]
-STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

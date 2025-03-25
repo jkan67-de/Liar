@@ -304,9 +304,6 @@ class Room extends Component {
 
   kickPlayer = async (playerId) => {
     try {
-      console.log('Attempting to kick player:', playerId);
-      console.log('Current player:', this.state.current_player);
-      
       const response = await fetch('/api/kick-player', {
         method: 'POST',
         headers: {
@@ -327,12 +324,8 @@ class Room extends Component {
 
       // Check if the kicked player is the current player
       const data = await response.json();
-      console.log('Kick response:', data);
-      console.log('Current player ID:', this.state.current_player?.id);
-      console.log('Kicked player ID:', data.kicked_player_id);
       
       if (data.kicked_player_id === this.state.current_player?.id) {
-        console.log('Current player was kicked, redirecting to home...');
         // If the current player was kicked, redirect to home
         this.props.navigate('/');
         return;
@@ -341,7 +334,6 @@ class Room extends Component {
       // Update room details
       this.getRoomDetails();
     } catch (error) {
-      console.error('Error kicking player:', error);
       alert(error.message);
     }
   };
@@ -370,9 +362,9 @@ class Room extends Component {
           <Grid item xs={12} align="center">
             {this.state.isHost && (
               <>
-                {this.state.players.length < 2 ? (
+                {this.state.players.length < 3 ? (
                   <Typography variant="body1" color="textSecondary" style={{ marginTop: "1rem" }}>
-                    Waiting for at least 2 players to start the game...
+                    Waiting for at least 3 players to start the game...
                   </Typography>
                 ) : (
                   <Button

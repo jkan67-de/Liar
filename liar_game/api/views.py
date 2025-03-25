@@ -61,6 +61,11 @@ class JoinRoom(APIView):
             room_result = Room.objects.filter(code=code)
             if len(room_result) > 0:
                 room = room_result[0]
+                
+                # Check if game has already started
+                if room.game_started:
+                    return Response({'error': 'Cannot join a room that has already started the game'}, status=status.HTTP_400_BAD_REQUEST)
+                
                 # Check if name is already taken in this room
                 if Player.objects.filter(room=room, name=player_name).exists():
                     return Response({'error': 'This name is already taken in this room'}, status=status.HTTP_400_BAD_REQUEST)
@@ -183,6 +188,11 @@ class StartGame(APIView):
         if room.game_started:
             return Response({'error': 'Game already started'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Check for minimum number of players
+        players = list(Player.objects.filter(room=room))
+        if len(players) < 3:
+            return Response({'error': 'Need at least 3 players to start the game'}, status=status.HTTP_400_BAD_REQUEST)
+
         # Get or create a question pair
         question_pair = QuestionPair.objects.first()  # In production, implement proper question selection
         if not question_pair:
@@ -193,10 +203,6 @@ class StartGame(APIView):
             )
 
         # Randomly select a liar
-        players = list(Player.objects.filter(room=room))
-        if len(players) < 2:
-            return Response({'error': 'Not enough players'}, status=status.HTTP_400_BAD_REQUEST)
-
         liar = random.choice(players)
         liar.is_liar = True
         liar.save()
