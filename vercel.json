@@ -30,7 +30,6 @@
         "SESSION_COOKIE_SECURE": "True",
         "CSRF_COOKIE_SECURE": "True",
         "CSRF_TRUSTED_ORIGINS": "https://liar-game.vercel.app",
-        "DJANGO_SECRET_KEY": "your-secret-key-here",
         "SESSION_COOKIE_DOMAIN": ".vercel.app",
         "CSRF_COOKIE_DOMAIN": ".vercel.app"
     }
